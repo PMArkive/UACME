@@ -4,9 +4,9 @@
 *
 *  TITLE:       SUP.H
 *
-*  VERSION:     3.55
+*  VERSION:     3.56
 *
-*  DATE:        12 Mar 2021
+*  DATE:        16 July 2021
 *
 *  Common header file for the program support routines.
 *
@@ -491,6 +491,10 @@ BOOL supGetAppxId(
     _In_ LPWSTR lpPackageName,
     _Out_ LPWSTR* lpAppxId,
     _Out_ PDWORD pcbAppxId);
+
+BOOL supStopTaskByName(
+    _In_ LPCWSTR TaskFolder,
+    _In_ LPCWSTR TaskName);
 
 #ifdef _DEBUG
 #define supDbgMsg(Message)  OutputDebugString(Message)

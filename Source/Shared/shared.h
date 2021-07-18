@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2018
+*  (C) COPYRIGHT AUTHORS, 2018 - 2021
 *
 *  TITLE:       SHARED.H
 *
-*  VERSION:     3.10
+*  VERSION:     3.56
 *
-*  DATE:        18 Nov 2018
+*  DATE:        15 July 2021
 *
 *  Shared include header file.
 *
@@ -25,8 +25,11 @@
 #pragma warning(disable: 4201) // nonstandard extension used : nameless struct/union
 
 #include <Windows.h>
+#include <taskschd.h>
 #include <ntstatus.h>
-#include "ntos.h"
+#include "ntos\ntos.h"
+
+#pragma comment(lib, "taskschd.lib")
 
 #define _NTDEF_
 #include <ntsecapi.h>

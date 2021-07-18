@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2014 - 2019
+*  (C) COPYRIGHT AUTHORS, 2014 - 2021
 *
 *  TITLE:       GLOBAL.H
 *
 *  VERSION:     1.40
 *
-*  DATE:        19 Mar 2019
+*  DATE:        15 July 2021
 *
 *  Common header file for the program support routines.
 *
@@ -35,8 +35,8 @@
 #include <Windows.h>
 #include <ntstatus.h>
 #include <CommCtrl.h>
-#include "shared\ntos.h"
-#include "shared\ntsxs.h"
+#include "shared\ntos\ntos.h"
+#include "shared\ntos\ntsxs.h"
 #include "shared\minirtl.h"
 #include "shared\_filename.h"
 #include "shared\cmdline.h"

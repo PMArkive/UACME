@@ -151,8 +151,6 @@ VOID DefaultPayload(
     BOOL bIsLocalSystem = FALSE;
     ULONG SessionId;
 
-    LARGE_INTEGER liDueTime;
-
     PFNCREATEPROCESSASUSERW pCreateProcessAsUser;
 
     if (!NT_SUCCESS(ucmCreateSyncMutant(&g_SyncMutant))) {
@@ -197,8 +195,8 @@ VOID DefaultPayload(
         ucmSetCompletion(g_SharedParams.szSignalObject);
     }
 
-    ucmFormatTimeOut(&liDueTime, 5000);
-    NtDelayExecution(FALSE, &liDueTime);
+    ucmSleep(5000);
+
     NtClose(g_SyncMutant);
 
     RtlExitUserProcess(ExitCode);

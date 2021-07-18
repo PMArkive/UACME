@@ -4,9 +4,9 @@
 *
 *  TITLE:       SUP.C
 *
-*  VERSION:     3.55
+*  VERSION:     3.56
 *
-*  DATE:        13 Mar 2021
+*  DATE:        16 July 2021
 *
 * THIS CODE AND INFORMATION IS PROVIDED "AS IS" WITHOUT WARRANTY OF
 * ANY KIND, EITHER EXPRESSED OR IMPLIED, INCLUDING BUT NOT LIMITED
@@ -4060,6 +4060,98 @@ BOOL supGetAppxId(
     if (lpValueData) supHeapFree(lpValueData);
 
     RegCloseKey(hKey);
+
+    return bResult;
+}
+
+/*
+* supStopTaskByName
+*
+* Purpose:
+*
+* Stop scheduled task by name.
+*
+*/
+BOOL supStopTaskByName(
+    _In_ LPCWSTR TaskFolder,
+    _In_ LPCWSTR TaskName
+)
+{
+    BOOL bResult = FALSE;
+    HRESULT hr;
+    ITaskService* pService = NULL;
+    ITaskFolder* pRootFolder = NULL;
+    IRegisteredTask* pTask = NULL;
+    TASK_STATE taskState;
+
+    BSTR bstrTaskFolder = NULL;
+    BSTR bstrTask = NULL;
+    VARIANT varDummy;
+
+    do {
+
+        bstrTaskFolder = SysAllocString(TaskFolder);
+        if (bstrTaskFolder == NULL)
+            break;
+
+        bstrTask = SysAllocString(TaskName);
+        if (bstrTask == NULL)
+            break;
+
+        hr = CoCreateInstance(&CLSID_TaskScheduler,
+            NULL,
+            CLSCTX_INPROC_SERVER,
+            &IID_ITaskService,
+            (void**)&pService);
+
+        if (FAILED(hr))
+            break;
+
+        VariantInit(&varDummy);
+
+        hr = pService->lpVtbl->Connect(pService,
+            varDummy,
+            varDummy,
+            varDummy,
+            varDummy);
+
+        if (FAILED(hr))
+            break;
+
+        hr = pService->lpVtbl->GetFolder(pService, bstrTaskFolder, &pRootFolder);
+        if (FAILED(hr))
+            break;
+
+        hr = pRootFolder->lpVtbl->GetTask(pRootFolder, bstrTask, &pTask);
+        if (FAILED(hr))
+            break;
+
+        hr = pTask->lpVtbl->get_State(pTask, &taskState);
+        if (FAILED(hr))
+            break;
+
+        if (taskState == TASK_STATE_RUNNING) {
+            hr = pTask->lpVtbl->Stop(pTask, 0);
+        }
+
+        bResult = SUCCEEDED(hr);
+
+    } while (FALSE);
+
+    if (bstrTaskFolder)
+        SysFreeString(bstrTaskFolder);
+
+    if (bstrTask)
+        SysFreeString(bstrTask);
+
+    if (pTask)
+        pTask->lpVtbl->Release(pTask);
+
+    if (pRootFolder)
+        pRootFolder->lpVtbl->Release(pRootFolder);
+
+    if (pService)
+        pService->lpVtbl->Release(pService);
 
     return bResult;
 }
