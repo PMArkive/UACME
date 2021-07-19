@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        16 July 2021
+*  DATE:        17 July 2021
 *
 *  Global support routines file shared between payload dlls.
 *
@@ -117,14 +117,14 @@ VOID ucmxQuerySystemDirectory(
 }
 
 /*
-* ucmxBinTextEncode
+* ucmBinTextEncode
 *
 * Purpose:
 *
 * Create pseudo random string from UI64 value.
 *
 */
-VOID ucmxBinTextEncode(
+VOID ucmBinTextEncode(
     _In_ unsigned __int64 x,
     _Inout_ wchar_t* s
 )
@@ -176,7 +176,7 @@ VOID ucmGenerateSharedObjectName(
 
     value.HighPart = MAKELONG(UACME_SHARED_BASE_ID, ObjectId);
 
-    ucmxBinTextEncode(value.QuadPart, lpBuffer);
+    ucmBinTextEncode(value.QuadPart, lpBuffer);
 }
 
 /*
@@ -1896,4 +1896,41 @@ BOOL ucmStopTaskByName(
         pService->lpVtbl->Release(pService);
 
     return bResult;
+}
+
+/*
+* ucmSetEnvironmentVariable
+*
+* Purpose:
+*
+* SetEnvironmentVariable replacement.
+*
+*/
+BOOL ucmSetEnvironmentVariable(
+    _In_ LPCWSTR lpName,
+    _In_ LPCWSTR lpValue
+)
+{
+    NTSTATUS ntStatus;
+    UNICODE_STRING Name, Value;
+
+    ntStatus = RtlInitUnicodeStringEx(&Name, lpName);
+    if (!NT_SUCCESS(ntStatus)) {
+        return FALSE;
+    }
+
+    if (lpValue) {
+        ntStatus = RtlInitUnicodeStringEx(&Value, lpValue);
+        if (!NT_SUCCESS(ntStatus)) {
+            return FALSE;
+        }
+
+        ntStatus = RtlSetEnvironmentVariable(NULL, &Name, &Value);
+    }
+    else {
+        ntStatus = RtlSetEnvironmentVariable(NULL, &Name, NULL);
+    }
+
+    return (NT_SUCCESS(ntStatus));
+
 }

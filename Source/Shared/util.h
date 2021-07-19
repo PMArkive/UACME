@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        16 July 2021
+*  DATE:        17 July 2021
 *
 *  Global support routines header file shared between payload dlls.
 *
@@ -57,6 +57,10 @@ typedef struct _OBJSCANPARAM {
     PWSTR Buffer;
     SIZE_T BufferSize;
 } OBJSCANPARAM, *POBJSCANPARAM;
+
+VOID ucmBinTextEncode(
+    _In_ unsigned __int64 x,
+    _Inout_ wchar_t* s);
 
 VOID ucmGenerateSharedObjectName(
     _In_ WORD ObjectId,
@@ -150,6 +154,10 @@ VOID ucmSleep(
 BOOL ucmStopTaskByName(
     _In_ LPCWSTR TaskFolder,
     _In_ LPCWSTR TaskName);
+
+BOOL ucmSetEnvironmentVariable(
+    _In_ LPCWSTR lpName,
+    _In_ LPCWSTR lpValue);
 
 #ifdef _DEBUG
 #define ucmDbgMsg(Message)  OutputDebugString(Message)

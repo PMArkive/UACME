@@ -1,4 +1,4 @@
-/*******************************************************************************
+/***************************))****************************************************
 *
 *  (C) COPYRIGHT AUTHORS, 2014 - 2021
 *
@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        16 July 2021
+*  DATE:        17 July 2021
 *
 *  Common header file for the program support routines.
 *
@@ -37,6 +37,7 @@
 #pragma warning(disable: 6258) // Using TerminateThread does not allow proper thread clean up
 #pragma warning(disable: 6320) // exception-filter expression is the constant EXCEPTION_EXECUTE_HANDLER
 #pragma warning(disable: 6255 6263)  // alloca
+#pragma warning(disable: 28159)
 
 #define PAYLOAD_ID_NONE MAXDWORD
 

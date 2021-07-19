@@ -5,9 +5,9 @@
 *
 *  TITLE:       NTOS.H
 *
-*  VERSION:     1.173
+*  VERSION:     1.174
 *
-*  DATE:        15 July 2021
+*  DATE:        17 July 2021
 *
 *  Common header file for the ntos API functions and definitions.
 *
@@ -7527,7 +7527,7 @@ NTSTATUS
 NTAPI
 RtlInitUnicodeStringEx(
     _Out_ PUNICODE_STRING DestinationString,
-    _In_opt_ PWSTR SourceString);
+    _In_opt_ PCWSTR SourceString);
 
 NTSYSAPI
 BOOLEAN

