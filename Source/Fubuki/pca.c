@@ -174,7 +174,6 @@ LRESULT CALLBACK pcaWndProcTrigger(
     return DefWindowProc(hwnd, uMsg, wParam, lParam);
 }
 
-
 /*
 * pcaWndTrigger
 *

@@ -708,7 +708,7 @@ First parameter is number of method to use, second is optional command (executab
      * Target(s): \system32\taskhostw.exe
      * Component(s): pcadm.dll
      * Implementation: ucmPcaMethod
-     * Works from: Windows 10 RS5 (17763)
+     * Works from: Windows 7 (7600)
      * AlwaysNotify compatible
      * Fixed in: unfixed :see_no_evil:
         * How: -

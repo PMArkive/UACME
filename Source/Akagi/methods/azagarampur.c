@@ -975,14 +975,14 @@ NTSTATUS ucmMsSettingsProtocolMethod(
 }
 
 /*
-* ucmxGetAppXSvcState
+* ucmxGetServiceState
 *
 * Purpose:
 *
-* Return AppXSvc service state.
+* Return service state.
 *
 */
-DWORD ucmxGetAppXSvcState(
+DWORD ucmxGetServiceState(
     _In_ SC_HANDLE ServiceHandle
 )
 {
@@ -1004,15 +1004,15 @@ DWORD ucmxGetAppXSvcState(
 }
 
 /*
-* ucmxIsAppXSvcRunning
+* ucmxRunService
 *
 * Purpose:
 *
-* Return running state of AppXSvc (restart it if stopped).
+* Start given service if stopped.
 *
 */
-BOOLEAN ucmxIsAppXSvcRunning(
-    VOID
+BOOLEAN ucmxRunService(
+    _In_ LPCWSTR lpServiceName
 )
 {
     BOOLEAN bRunning = FALSE;
@@ -1023,7 +1023,7 @@ BOOLEAN ucmxIsAppXSvcRunning(
 
         schManager = OpenSCManager(
             NULL,
-            NULL,
+            SERVICES_ACTIVE_DATABASE,
             SC_MANAGER_CONNECT);
 
         if (schManager == NULL)
@@ -1031,13 +1031,13 @@ BOOLEAN ucmxIsAppXSvcRunning(
 
         schService = OpenService(
             schManager,
-            T_APPXSVC,
+            lpServiceName,
             SERVICE_QUERY_STATUS | SERVICE_START);
 
         if (schService == NULL)
             break;
 
-        dwState = ucmxGetAppXSvcState(schService);
+        dwState = ucmxGetServiceState(schService);
 
         if (dwState == SERVICE_RUNNING) {
             bRunning = TRUE;
@@ -1052,7 +1052,7 @@ BOOLEAN ucmxIsAppXSvcRunning(
 
             do {
 
-                dwState = ucmxGetAppXSvcState(schService);
+                dwState = ucmxGetServiceState(schService);
                 if (dwState == SERVICE_RUNNING) {
                     bRunning = TRUE;
                     break;
@@ -1070,7 +1070,7 @@ BOOLEAN ucmxIsAppXSvcRunning(
 
                 Sleep(1000);
 
-                dwState = ucmxGetAppXSvcState(schService);
+                dwState = ucmxGetServiceState(schService);
                 if (dwState == SERVICE_RUNNING) {
                     bRunning = TRUE;
                     break;
@@ -1089,6 +1089,21 @@ BOOLEAN ucmxIsAppXSvcRunning(
         CloseServiceHandle(schManager);
 
     return bRunning;
+}
+
+/*
+* ucmxIsAppXSvcRunning
+*
+* Purpose:
+*
+* Return running state of AppXSvc (restart it if stopped).
+*
+*/
+BOOLEAN ucmxIsAppXSvcRunning(
+    VOID
+)
+{
+    return ucmxRunService(T_APPXSVC);
 }
 
 /*
@@ -1615,8 +1630,7 @@ NTSTATUS ucmPcaMethod(
         }
         else {
 
-            //FIXME
-            //Execute PcaSvc
+            ucmxRunService(T_PCASVC);
 
         }
 
@@ -1795,7 +1809,6 @@ NTSTATUS ucmPcaMethod(
 
         if (pvLoaderBlock->OpResult != FUBUKI_PCA_ALL_RUN) {
             OutputDebugString(L"[UCM] Loader failed\r\n");
-            supSetGlobalCompletionEvent();
         } 
 
     } while (FALSE);
@@ -1866,6 +1879,9 @@ NTSTATUS ucmPcaMethod(
 
     if (SUCCEEDED(hr_init))
         CoUninitialize();
+
+    if (MethodResult != STATUS_SUCCESS)
+        supSetGlobalCompletionEvent();
 
     return MethodResult;
 }
