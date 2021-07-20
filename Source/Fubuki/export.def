@@ -16,8 +16,8 @@ MpHandleClose               = UiAccessMethodHookProc
 MpScanStart                 = EntryPointExeMode
 MpScanControl               = EntryPointUIAccessLoader
 MpThreatOpen                = EntryPointSxsConsent
-MpManagerStatusQuery        = EntryPointExeModePCAMethod
-MpManagerStatusQueryEx      = EntryPointDllPCAMethod
+MpManagerStatusQuery        = pcaEntryPointLoader
+MpManagerStatusQueryEx      = pcaEntryPointDll
 
 ; MSCOREE.DLL
 ClrCreateManagedInstance    = DummyFunc

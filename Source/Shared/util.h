@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        17 July 2021
+*  DATE:        19 July 2021
 *
 *  Global support routines header file shared between payload dlls.
 *
@@ -150,10 +150,6 @@ PLARGE_INTEGER ucmFormatTimeOut(
 
 VOID ucmSleep(
     _In_ DWORD Miliseconds);
-
-BOOL ucmStopTaskByName(
-    _In_ LPCWSTR TaskFolder,
-    _In_ LPCWSTR TaskName);
 
 BOOL ucmSetEnvironmentVariable(
     _In_ LPCWSTR lpName,

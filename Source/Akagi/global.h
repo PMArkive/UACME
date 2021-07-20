@@ -127,7 +127,10 @@ typedef struct _UACME_CONTEXT {
     WCHAR                   szSystemDirectory[MAX_PATH + 1];
 
     // Current user temp directory with end slash
-    WCHAR                   szTempDirectory[MAX_PATH + 1]; 
+    WCHAR                   szTempDirectory[MAX_PATH + 1];
+
+    // Current program directory with end slash
+    WCHAR                   szCurrentDirectory[MAX_PATH + 1];
 
     // Optional parameter, limited to MAX_PATH
     WCHAR                   szOptionalParameter[MAX_PATH + 1]; 

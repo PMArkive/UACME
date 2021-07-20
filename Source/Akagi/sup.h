@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        16 July 2021
+*  DATE:        17 July 2021
 *
 *  Common header file for the program support routines.
 *
@@ -495,6 +495,13 @@ BOOL supGetAppxId(
 BOOL supStopTaskByName(
     _In_ LPCWSTR TaskFolder,
     _In_ LPCWSTR TaskName);
+
+LPWSTR supPathAddBackSlash(
+    _In_ LPWSTR lpszPath);
+
+BOOL supSetExternalManifestForFile(
+    _In_ LPCWSTR lpFileName,
+    _In_ BOOL bRemove);
 
 #ifdef _DEBUG
 #define supDbgMsg(Message)  OutputDebugString(Message)

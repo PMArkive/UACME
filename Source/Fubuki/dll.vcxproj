@@ -355,6 +355,7 @@
     <ClCompile Include="..\Shared\_strncpy.c" />
     <ClCompile Include="..\Shared\_strstri.c" />
     <ClCompile Include="dllmain.c" />
+    <ClCompile Include="pca.c" />
     <ClCompile Include="uihacks.c" />
   </ItemGroup>
   <ItemGroup>
@@ -365,6 +366,7 @@
     <ClInclude Include="..\Shared\windefend.h" />
     <ClInclude Include="..\Shared\_filename.h" />
     <ClInclude Include="fubuki.h" />
+    <ClInclude Include="pca.h" />
     <ClInclude Include="resource.h" />
     <ClInclude Include="uihacks.h" />
     <ClInclude Include="winmm.h" />

@@ -91,6 +91,8 @@
 #define T_DOTNET_CLIENT             L"Software\\Microsoft\\Windows NT\\CurrentVersion\\KnownFunctionTableDlls"
 #define T_DOTNET_FULL               L"Software\\Microsoft\\NET Framework Setup\\NDP\\v4\\Full"
 #define T_PCA_STORE                 L"Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Compatibility Assistant\\Store"
+#define T_APPCOMPAT_LAYERS          L"Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Layers"
+#define T_PCA_PERSISTED             L"Software\\Microsoft\\Windows NT\\CurrentVersion\\AppCompatFlags\\Compatibility Assistant\\Persisted"
 
 #define T_MSSETTINGS                L"ms-settings"
 #define T_MSWINDOWSSTORE            L"ms-windows-store"
