@@ -6,7 +6,7 @@
 *
 *  VERSION:     3.56
 *
-*  DATE:        17 July 2021
+*  DATE:        20 July 2021
 *
 *  Common header file for the program support routines.
 *
@@ -283,6 +283,12 @@ BOOL supSetEnvVariableEx(
     _In_opt_ LPWSTR lpVariableData);
 
 BOOL supSetEnvVariable(
+    _In_ BOOL fRemove,
+    _In_opt_ LPWSTR lpKeyName,
+    _In_ LPWSTR lpVariableName,
+    _In_opt_ LPWSTR lpVariableData);
+
+BOOL supSetEnvVariable2(
     _In_ BOOL fRemove,
     _In_opt_ LPWSTR lpKeyName,
     _In_ LPWSTR lpVariableName,

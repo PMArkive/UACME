@@ -1727,7 +1727,7 @@ NTSTATUS ucmPcaMethod(
             szEnvVar[nLen - 1] = 0;
         }
 
-        fEnvSet = supSetEnvVariable(FALSE, NULL, T_WINDIR, szEnvVar);
+        fEnvSet = supSetEnvVariable2(FALSE, NULL, T_WINDIR, szEnvVar);
         if (fEnvSet == FALSE) {
             OutputDebugString(L"[UCM] supSetEnvVariable(WINDIR) failed\r\n");
             break;

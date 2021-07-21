@@ -1455,20 +1455,19 @@ BOOL supSetEnvVariableEx(
                 (BYTE*)lpVariableData,
                 cbData);
 
-            if (NT_SUCCESS(ntStatus)) {
-
-                SendMessageTimeout(HWND_BROADCAST,
-                    WM_SETTINGCHANGE,
-                    0,
-                    (LPARAM)lpVariableName,
-                    SMTO_BLOCK,
-                    1000,
-                    NULL);
-
-            }
-
         }
 
+        if (NT_SUCCESS(ntStatus)) {
+
+            SendMessageTimeout(HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                (LPARAM)lpVariableName,
+                SMTO_BLOCK,
+                1000,
+                NULL);
+
+        }
 
     } while (FALSE);
 
@@ -1524,15 +1523,105 @@ BOOL supSetEnvVariable(
             bResult = (RegSetValueEx(hKey, lpVariableName, 0, REG_SZ,
                 (BYTE*)lpVariableData, cbData) == ERROR_SUCCESS);
 
-            if (bResult) {
-                SendMessageTimeout(HWND_BROADCAST,
-                    WM_SETTINGCHANGE,
-                    0,
-                    (LPARAM)lpVariableName,
-                    SMTO_BLOCK,
-                    1000,
-                    NULL);
+        }
+
+        if (bResult) {
+            SendMessageTimeout(HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                (LPARAM)lpVariableName,
+                SMTO_BLOCK,
+                1000,
+                NULL);
+        }
+
+    } while (FALSE);
+
+    if (hKey != NULL) {
+        RegFlushKey(hKey);
+        RegCloseKey(hKey);
+    }
+
+    return bResult;
+}
+
+/*
+* supSetEnvVariable
+*
+* Purpose:
+*
+* Remove or set current user environment variable.
+*
+*/
+BOOL supSetEnvVariable2(
+    _In_ BOOL fRemove,
+    _In_opt_ LPWSTR lpKeyName,
+    _In_ LPWSTR lpVariableName,
+    _In_opt_ LPWSTR lpVariableData
+)
+{
+    BOOL    bResult = FALSE;
+    HKEY    hKey = NULL;
+    DWORD   cbData;
+
+    LPWSTR lpSubKey;
+
+    LARGE_INTEGER liValue;
+    ULONG seedValue;
+    WCHAR szNewKey[MAX_PATH];
+
+    do {
+        if (lpVariableName == NULL)
+            break;
+
+        if (lpKeyName == NULL)
+            lpSubKey = L"Environment";
+        else
+            lpSubKey = lpKeyName;
+
+        if ((lpVariableData == NULL) && (fRemove == FALSE))
+            break;
+
+        RtlSecureZeroMemory(&szNewKey, sizeof(szNewKey));
+        seedValue = GetTickCount();
+        liValue.LowPart = RtlRandomEx(&seedValue);
+        seedValue = ~GetTickCount();
+        liValue.HighPart = RtlRandomEx(&seedValue);
+
+        supBinTextEncode(liValue.QuadPart, szNewKey);
+
+        if (ERROR_SUCCESS == RegRenameKey(HKEY_CURRENT_USER, lpSubKey, szNewKey)) {
+
+            if (ERROR_SUCCESS == RegOpenKey(HKEY_CURRENT_USER, szNewKey, &hKey)) {
+
+                if (fRemove) {
+                    bResult = (RegDeleteValue(hKey, lpVariableName) == ERROR_SUCCESS);
+                }
+                else {
+                    cbData = (DWORD)((1 + _strlen(lpVariableData)) * sizeof(WCHAR));
+                    bResult = (RegSetValueEx(hKey, lpVariableName, 0, REG_SZ,
+                        (BYTE*)lpVariableData, cbData) == ERROR_SUCCESS);
+
+
+                }
+
+                RegFlushKey(hKey);
+                RegCloseKey(hKey);
+                hKey = NULL;
+
             }
+
+            RegRenameKey(HKEY_CURRENT_USER, szNewKey, lpSubKey);
+        }
+
+        if (bResult) {
+            SendMessageTimeout(HWND_BROADCAST,
+                WM_SETTINGCHANGE,
+                0,
+                (LPARAM)lpVariableName,
+                SMTO_BLOCK,
+                1000,
+                NULL);
         }
 
     } while (FALSE);
