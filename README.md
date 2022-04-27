@@ -743,6 +743,16 @@ First parameter is number of method to use, second is optional command (executab
      * Fixed in: unfixed :see_no_evil:
         * How: -
       * Code status: added in v3.5.9
+73. Author: orange_8361
+     * Type: Shell API 
+     * Method: .NET deserialization, Registry key manipulation
+     * Target(s): \system32\EventVwr.exe
+     * Component(s): Attacker defined
+     * Implementation: ucmDotNetSerialMethod
+     * Works from: Windows 8.1 (9600)
+     * Fixed in: unfixed :see_no_evil:
+        * How: -
+      * Code status: added in v3.6.0
 
 </details>
 
